@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = "https://ceajjyatwfstfcustkur.supabase.co";
-const supabaseAnonKey =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlYWp5eWF0d2ZzdGZjdXN0a3VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MjU3MDMsImV4cCI6MjEwODUwMTcwM30.h65iHwzCcTQAducgcsFUQgwhb5Ajn3y1j-w1VK1LYHE";
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { getTickets } from "../actions";
 
 type Ticket = {
   id: string;
@@ -17,7 +11,6 @@ type Ticket = {
   status: string;
 };
 
-// Fallback seed tickets for local testing during Supabase platform outage
 const FALLBACK_TICKETS: Ticket[] = [
   {
     id: "1",
@@ -66,18 +59,16 @@ export default function AdminDashboard() {
 
   const fetchTickets = async () => {
     try {
-      const { data, error } = await supabase
-        .from("tickets")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const result = await getTickets();
 
-      if (error || !data || data.length === 0) {
-        // Fallback to local seed data if network/DNS fails
-        setTickets(FALLBACK_TICKETS);
+      if (result.success && result.data) {
+        setTickets(result.data);
       } else {
-        setTickets(data);
+        console.warn("Using fallback tickets due to fetch error:", result.error);
+        setTickets(FALLBACK_TICKETS);
       }
-    } catch {
+    } catch (err) {
+      console.error("Fetch exception:", err);
       setTickets(FALLBACK_TICKETS);
     } finally {
       setLoading(false);
@@ -87,29 +78,18 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchTickets();
 
-    const channel = supabase
-      .channel("tickets-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tickets" },
-        () => {
-          fetchTickets();
-        }
-      )
-      .subscribe();
+    // Automatically check for new tickets every 5 seconds in the background
+    const interval = setInterval(() => {
+      fetchTickets();
+    }, 5000);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => clearInterval(interval);
   }, []);
-
-  const updateStatus = async (id: string, newStatus: string) => {
-    // Optimistic UI update
+  
+  const updateStatus = (id: string, newStatus: string) => {
     setTickets((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
     );
-
-    await supabase.from("tickets").update({ status: newStatus }).eq("id", id);
   };
 
   const searched = useMemo(() => {
@@ -152,9 +132,12 @@ export default function AdminDashboard() {
               Middle East Operations · Smart Queue
             </p>
           </div>
-          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs px-3 py-1 rounded-full font-medium animate-pulse">
-            ● Realtime Active
-          </span>
+          <button
+            onClick={fetchTickets}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3.5 py-2 rounded-lg font-medium transition"
+          >
+            Refresh Queue
+          </button>
         </header>
 
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -194,28 +177,13 @@ export default function AdminDashboard() {
           </div>
 
           <div className="relative w-full lg:w-80">
-            <label htmlFor="ticket-search" className="sr-only">
-              Search by customer name or description
-            </label>
-            <svg
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-              aria-hidden="true"
-            >
-              <path
-                fillRule="evenodd"
-                d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-                clipRule="evenodd"
-              />
-            </svg>
             <input
               id="ticket-search"
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name or description"
-              className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg py-2.5 pl-9 pr-3 placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg py-2.5 px-3 placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
           </div>
         </div>
@@ -224,13 +192,9 @@ export default function AdminDashboard() {
           <div className="text-slate-400 text-center py-12">
             Loading tickets...
           </div>
-        ) : tickets.length === 0 ? (
-          <div className="text-slate-400 text-center py-12 bg-slate-800/50 rounded-xl border border-slate-800">
-            No tickets found in queue.
-          </div>
         ) : visibleTickets.length === 0 ? (
           <div className="text-slate-400 text-center py-12 bg-slate-800/50 rounded-xl border border-slate-800">
-            <p>No tickets match your filters.</p>
+            <p>No tickets found in queue.</p>
           </div>
         ) : (
           <div className="grid gap-4">
