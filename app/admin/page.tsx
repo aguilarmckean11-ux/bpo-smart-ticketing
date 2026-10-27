@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getTickets } from "../actions";
+import { getTickets, updateTicketStatus } from "../actions";
 
 type Ticket = {
   id: string;
@@ -9,6 +9,7 @@ type Ticket = {
   customer_name: string;
   issue_description: string;
   status: string;
+  priority?: string;
 };
 
 const FALLBACK_TICKETS: Ticket[] = [
@@ -18,6 +19,7 @@ const FALLBACK_TICKETS: Ticket[] = [
     customer_name: "Ahmad Al-Mansoor",
     issue_description: "Payment gateway checkout failing on AED currency transactions.",
     status: "open",
+    priority: "high",
   },
   {
     id: "2",
@@ -25,6 +27,7 @@ const FALLBACK_TICKETS: Ticket[] = [
     customer_name: "Fatima Al-Zahra",
     issue_description: "Requesting bilingual Arabic/English support agent for enterprise onboarding.",
     status: "in_progress",
+    priority: "medium",
   },
   {
     id: "3",
@@ -32,6 +35,7 @@ const FALLBACK_TICKETS: Ticket[] = [
     customer_name: "Tariq Hassan",
     issue_description: "API webhook timeout error during peak Dubai office hours.",
     status: "resolved",
+    priority: "high",
   },
   {
     id: "4",
@@ -39,6 +43,7 @@ const FALLBACK_TICKETS: Ticket[] = [
     customer_name: "Laila El-Sayed",
     issue_description: "Order confirmation SMS notifications delayed across GCC carriers.",
     status: "open",
+    priority: "low",
   },
 ];
 
@@ -86,10 +91,23 @@ export default function AdminDashboard() {
     return () => clearInterval(interval);
   }, []);
   
-  const updateStatus = (id: string, newStatus: string) => {
+  const updateStatus = async (id: string, newStatus: string) => {
+    // Optimistically update local UI state immediately for responsiveness
     setTickets((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
     );
+
+    try {
+      // Persist change to Supabase database via Server Action
+      const result = await updateTicketStatus(id, newStatus);
+      if (!result.success) {
+        console.error("Failed to update status in database:", result.error);
+        fetchTickets(); // Fallback: refetch fresh data if server update fails
+      }
+    } catch (err) {
+      console.error("Exception updating status:", err);
+      fetchTickets();
+    }
   };
 
   const searched = useMemo(() => {
@@ -208,6 +226,16 @@ export default function AdminDashboard() {
                     <h3 className="font-semibold text-white">
                       {ticket.customer_name}
                     </h3>
+                    {/* Priority Badge */}
+  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+    ticket.priority === 'high' 
+      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+      : ticket.priority === 'medium'
+      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+  }`}>
+    {ticket.priority || 'normal'}
+  </span>
                     <span className="text-xs text-slate-400">
                       {new Date(ticket.created_at).toLocaleTimeString([], {
                         hour: "2-digit",

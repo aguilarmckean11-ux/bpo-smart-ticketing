@@ -43,3 +43,18 @@ export async function getTickets() {
     return { success: false, error: err.message }
   }
 }
+
+export async function updateTicketStatus(id: string, status: string) {
+  try {
+    const { error } = await supabase
+      .from('tickets')
+      .update({ status })
+      .eq('id', id)
+
+    if (error) throw error
+    return { success: true }
+  } catch (err: any) {
+    console.error('Error updating ticket status:', err)
+    return { success: false, error: err.message }
+  }
+}
