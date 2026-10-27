@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { submitTicket } from "./actions"; // Now `./actions` works because `app/page.tsx` and `app/actions.ts` are in the same folder!
+import { submitTicket } from "./actions";
 
 export default function CustomerForm() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("normal"); // Added priority state
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -17,12 +18,14 @@ export default function CustomerForm() {
     setSuccessMessage("");
 
     try {
-      const result = await submitTicket({ name, description });
+      // Pass priority along with name and description
+      const result = await submitTicket({ name, description, priority });
 
       if (result.success) {
         setSuccessMessage("Ticket submitted successfully!");
         setName("");
         setDescription("");
+        setPriority("normal"); // Reset priority
       } else {
         setError(result.error || "Failed to submit ticket.");
       }
@@ -75,6 +78,21 @@ export default function CustomerForm() {
             placeholder="Describe what happened, what you expected, and any steps to reproduce."
             className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
           />
+        </div>
+
+        {/* Priority Dropdown */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Priority Level</label>
+          <select
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500 capitalize"
+          >
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
         </div>
 
         <button

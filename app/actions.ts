@@ -7,7 +7,8 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-export async function submitTicket(formData: { name: string; description: string }) {
+// Added `priority?: string` to accept priority levels from the customer form
+export async function submitTicket(formData: { name: string; description: string; priority?: string }) {
   try {
     const { data, error } = await supabase
       .from('tickets')
@@ -15,6 +16,7 @@ export async function submitTicket(formData: { name: string; description: string
         {
           customer_name: formData.name,
           issue_description: formData.description,
+          priority: formData.priority || 'normal', // Default to normal if empty
           status: 'open',
         },
       ])

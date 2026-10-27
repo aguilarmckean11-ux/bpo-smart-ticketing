@@ -26,26 +26,32 @@ export function LoginForm({
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleLogin = async (e: React.SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
+const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const supabase = createClient();
+  setIsLoading(true);
+  setError(null);
 
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
-    } finally {
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      setError(error.message);
       setIsLoading(false);
+      return;
     }
-  };
+
+    // 📍 CHANGE THIS ROUTER PUSH FROM "/protected" TO "/admin"
+    router.push("/admin");
+    router.refresh();
+  } catch (err) {
+    setError("An unexpected error occurred");
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -93,15 +99,7 @@ export function LoginForm({
                 {isLoading ? "Logging in..." : "Login"}
               </Button>
             </div>
-            <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <Link
-                href="/auth/sign-up"
-                className="underline underline-offset-4"
-              >
-                Sign up
-              </Link>
-            </div>
+
           </form>
         </CardContent>
       </Card>

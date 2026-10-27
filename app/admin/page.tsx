@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { getTickets, updateTicketStatus } from "../actions";
 
 type Ticket = {
@@ -12,41 +14,6 @@ type Ticket = {
   priority?: string;
 };
 
-const FALLBACK_TICKETS: Ticket[] = [
-  {
-    id: "1",
-    created_at: new Date().toISOString(),
-    customer_name: "Ahmad Al-Mansoor",
-    issue_description: "Payment gateway checkout failing on AED currency transactions.",
-    status: "open",
-    priority: "high",
-  },
-  {
-    id: "2",
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    customer_name: "Fatima Al-Zahra",
-    issue_description: "Requesting bilingual Arabic/English support agent for enterprise onboarding.",
-    status: "in_progress",
-    priority: "medium",
-  },
-  {
-    id: "3",
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    customer_name: "Tariq Hassan",
-    issue_description: "API webhook timeout error during peak Dubai office hours.",
-    status: "resolved",
-    priority: "high",
-  },
-  {
-    id: "4",
-    created_at: new Date(Date.now() - 10800000).toISOString(),
-    customer_name: "Laila El-Sayed",
-    issue_description: "Order confirmation SMS notifications delayed across GCC carriers.",
-    status: "open",
-    priority: "low",
-  },
-];
-
 type TabKey = "all" | "open" | "in_progress" | "resolved";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -57,59 +24,124 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 export default function AdminDashboard() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  // 1. All state hooks at the top
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("all");
-  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [search, setSearch] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [loadingUser, setLoadingUser] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
 
-  const fetchTickets = async () => {
+  // Notification state
+  const [newNotificationCount, setNewNotificationCount] = useState<number>(0);
+  const [notificationMessage, setNotificationMessage] = useState<string>("");
+
+  // Play a soft, professional chime using browser Web Audio API (no external audio files needed)
+  const playNotificationSound = () => {
     try {
-      const result = await getTickets();
+      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
 
-      if (result.success && result.data) {
-        setTickets(result.data);
-      } else {
-        console.warn("Using fallback tickets due to fetch error:", result.error);
-        setTickets(FALLBACK_TICKETS);
-      }
-    } catch (err) {
-      console.error("Fetch exception:", err);
-      setTickets(FALLBACK_TICKETS);
-    } finally {
-      setLoading(false);
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 pitch
+      oscillator.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5 pitch
+
+      gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.4);
+    } catch (e) {
+      console.error("Audio playback error:", e);
     }
   };
 
+  // 2. Authentication check effect
   useEffect(() => {
-    fetchTickets();
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+      } else {
+        setUserEmail(session.user.email ?? "BPO Agent");
+        setLoadingUser(false);
+      }
+    };
+    checkUser();
+  }, [router, supabase]);
 
-    // Automatically check for new tickets every 5 seconds in the background
+  // 3. Ticket fetching with intelligent diffing & notification triggers
+  const fetchTickets = async (isInitial = false) => {
+    try {
+      if (isInitial) setLoading(true);
+      const result = await getTickets();
+      if (result.success && result.data) {
+        setTickets((prevTickets) => {
+          if (!isInitial && prevTickets.length > 0) {
+            const diff = result.data.length - prevTickets.length;
+            if (diff > 0) {
+              playNotificationSound();
+              setNewNotificationCount((prev) => Math.min(prev + diff, 5)); // Stacks 1 to 5+
+              setNotificationMessage(
+                diff === 1 
+                  ? "New customer support ticket received!" 
+                  : `${diff} new tickets added to queue!`
+              );
+            }
+          }
+          return result.data;
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching tickets:", err);
+    } finally {
+      if (isInitial) setLoading(false);
+    }
+  };
+
+  // 4. Silent background polling every 5s
+  useEffect(() => {
+    fetchTickets(true); // Full loader on initial page mount only
     const interval = setInterval(() => {
-      fetchTickets();
+      fetchTickets(false); // Silent check in background
     }, 5000);
-
     return () => clearInterval(interval);
   }, []);
-  
+
+  // 5. Sign out handler
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/auth/login");
+  };
+
+  // 6. Status update handler
   const updateStatus = async (id: string, newStatus: string) => {
-    // Optimistically update local UI state immediately for responsiveness
     setTickets((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
     );
 
     try {
-      // Persist change to Supabase database via Server Action
       const result = await updateTicketStatus(id, newStatus);
       if (!result.success) {
         console.error("Failed to update status in database:", result.error);
-        fetchTickets(); // Fallback: refetch fresh data if server update fails
+        fetchTickets(false);
       }
     } catch (err) {
       console.error("Exception updating status:", err);
-      fetchTickets();
+      fetchTickets(false);
     }
   };
 
+  // 7. Memoized search & filters
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return tickets;
@@ -130,34 +162,98 @@ export default function AdminDashboard() {
     [searched]
   );
 
-  const visibleTickets = useMemo(
-    () =>
-      activeTab === "all"
-        ? searched
-        : searched.filter((t) => t.status === activeTab),
-    [searched, activeTab]
-  );
+  const visibleTickets = useMemo(() => {
+    return tickets.filter((ticket) => {
+      const matchesStatus = activeTab === "all" || ticket.status === activeTab;
+      const ticketPriority = ticket.priority?.toLowerCase() || "normal";
+      const matchesPriority = priorityFilter === "all" || ticketPriority === priorityFilter;
+      const matchesSearch =
+        ticket.customer_name.toLowerCase().includes(search.toLowerCase()) ||
+        ticket.issue_description.toLowerCase().includes(search.toLowerCase());
+
+      return matchesStatus && matchesPriority && matchesSearch;
+    });
+  }, [tickets, activeTab, priorityFilter, search]);
+
+  // 8. Conditional loading guard (COMES LAST, AFTER ALL HOOKS)
+  if (loadingUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <p className="text-slate-400 font-medium">Verifying authentication...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-8">
       <div className="max-w-6xl mx-auto space-y-6">
+        
+        {/* 🔔 PROFESSIONAL FLOATING NOTIFICATION BANNER */}
+        {newNotificationCount > 0 && (
+          <div className="bg-indigo-600/90 border border-indigo-400/30 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-between backdrop-blur-md transition-all">
+            <div className="flex items-center gap-3">
+              <span className="flex h-3 w-3 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-300 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+              </span>
+              <p className="text-sm font-semibold">
+                🔔 {notificationMessage} 
+                <span className="bg-white/20 px-2.5 py-0.5 rounded-full text-xs font-bold ml-2">
+                  {newNotificationCount >= 5 ? "5+" : newNotificationCount} new
+                </span>
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setNewNotificationCount(0);
+                fetchTickets(false);
+              }}
+              className="bg-white text-indigo-900 hover:bg-indigo-50 px-3 py-1 rounded-lg text-xs font-bold transition shadow-sm"
+            >
+              Dismiss / Refresh Queue
+            </button>
+          </div>
+        )}
+
+        {/* HEADER */}
         <header className="flex justify-between items-center border-b border-slate-800 pb-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              BPO Agent Dashboard
-            </h1>
-            <p className="text-sm text-slate-400">
-              Middle East Operations · Smart Queue
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-white">BPO Agent Dashboard</h1>
+            <p className="text-slate-400 text-sm">Middle East Operations - Smart Queue</p>
           </div>
-          <button
-            onClick={fetchTickets}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3.5 py-2 rounded-lg font-medium transition"
-          >
-            Refresh Queue
-          </button>
+
+          <div className="flex items-center gap-3">
+            {userEmail && (
+              <span className="text-sm text-slate-400 font-medium bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                👤 {userEmail}
+              </span>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-lg text-sm font-medium transition"
+            >
+              Sign Out
+            </button>
+
+            <button
+              onClick={() => {
+                setNewNotificationCount(0);
+                fetchTickets(false);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2"
+            >
+              <span>Refresh Queue</span>
+              {newNotificationCount > 0 && (
+                <span className="bg-white text-indigo-900 px-1.5 py-0.2 rounded-full text-xs font-bold">
+                  {newNotificationCount >= 5 ? "5+" : newNotificationCount}
+                </span>
+              )}
+            </button>
+          </div>
         </header>
 
+        {/* FILTERS & SEARCH */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div
             role="tablist"
@@ -194,6 +290,23 @@ export default function AdminDashboard() {
             })}
           </div>
 
+          <div className="flex items-center gap-2 mt-4 mb-2 text-xs font-semibold text-slate-400">
+            <span>Priority:</span>
+            {["all", "high", "medium", "low", "normal"].map((p) => (
+              <button
+                key={p}
+                onClick={() => setPriorityFilter(p)}
+                className={`px-2.5 py-1 rounded-md capitalize transition-colors ${
+                  priorityFilter === p
+                    ? "bg-slate-700 text-white font-bold border border-slate-600"
+                    : "hover:bg-slate-800/60 text-slate-400"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
           <div className="relative w-full lg:w-80">
             <input
               id="ticket-search"
@@ -206,6 +319,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {/* TICKET QUEUE LIST */}
         {loading ? (
           <div className="text-slate-400 text-center py-12">
             Loading tickets...
@@ -219,23 +333,22 @@ export default function AdminDashboard() {
             {visibleTickets.map((ticket) => (
               <div
                 key={ticket.id}
-                className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
+                className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-600"
               >
                 <div className="space-y-1 max-w-2xl">
                   <div className="flex items-center gap-3">
                     <h3 className="font-semibold text-white">
                       {ticket.customer_name}
                     </h3>
-                    {/* Priority Badge */}
-  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-    ticket.priority === 'high' 
-      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
-      : ticket.priority === 'medium'
-      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-  }`}>
-    {ticket.priority || 'normal'}
-  </span>
+                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                      ticket.priority === 'high' 
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+                        : ticket.priority === 'medium'
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    }`}>
+                      {ticket.priority || 'normal'}
+                    </span>
                     <span className="text-xs text-slate-400">
                       {new Date(ticket.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
