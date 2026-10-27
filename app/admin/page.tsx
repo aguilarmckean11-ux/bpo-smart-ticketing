@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { getTickets, updateTicketStatus } from "../actions";
+import { getTickets, updateTicketStatus, assignTicketAgent, getTicketReplies, addTicketReply } from "../actions";
 
 type Ticket = {
   id: string;
@@ -76,7 +76,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const supabase = createClient();
 
-  // 1. All state hooks at the top
+  // State
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -87,13 +87,18 @@ export default function AdminDashboard() {
   const [loadingUser, setLoadingUser] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
 
+  // AI Drawer State
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [replies, setReplies] = useState<any[]>([]);
+  const [replyText, setReplyText] = useState<string>("");
+  const [aiGenerating, setAiGenerating] = useState<boolean>(false);
+
   // Notification state
   const [newNotificationCount, setNewNotificationCount] = useState<number>(0);
   const [notificationMessage, setNotificationMessage] = useState<string>("");
 
   const t = DICTIONARY[lang];
 
-  // Play a soft, professional chime using browser Web Audio API
   const playNotificationSound = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -117,7 +122,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 2. Authentication check & role assignment
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -133,7 +137,6 @@ export default function AdminDashboard() {
     checkUser();
   }, [router, supabase]);
 
-  // 3. Ticket fetching with silent background polling & notification diffing
   const fetchTickets = async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
@@ -160,7 +163,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 4. Background polling effect every 5s
   useEffect(() => {
     fetchTickets(true);
     const interval = setInterval(() => {
@@ -169,17 +171,15 @@ export default function AdminDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // 5. Sign out handler
   const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    const supabaseClient = createClient();
+    await supabaseClient.auth.signOut();
     router.push("/auth/login");
   };
 
-  // 6. Status update handler
   const updateStatus = async (id: string, newStatus: string) => {
     setTickets((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
+      prev.map((tk) => (tk.id === id ? { ...tk, status: newStatus } : tk))
     );
 
     try {
@@ -194,7 +194,33 @@ export default function AdminDashboard() {
     }
   };
 
-  // 7. Memoized metrics calculation for Option 3
+  const openTicketDrawer = async (ticket: Ticket) => {
+    setSelectedTicket(ticket);
+    setReplyText("");
+    const res = await getTicketReplies(ticket.id);
+    if (res.success && res.data) {
+      setReplies(res.data);
+    }
+  };
+
+  const handleSendReply = async () => {
+    if (!replyText.trim() || !selectedTicket) return;
+
+    const newReply = {
+      ticket_id: selectedTicket.id,
+      sender_type: "agent",
+      sender_email: userEmail || "agent@bpo.com",
+      message: replyText,
+      created_at: new Date().toISOString(),
+    };
+
+    setReplies((prev) => [...prev, newReply]);
+    const textToSend = replyText;
+    setReplyText("");
+
+    await addTicketReply(selectedTicket.id, "agent", userEmail || "agent@bpo.com", textToSend);
+  };
+
   const metrics = useMemo(() => {
     const total = tickets.length;
     const openCount = tickets.filter((tk) => tk.status === "open").length;
@@ -210,23 +236,22 @@ export default function AdminDashboard() {
     };
   }, [tickets]);
 
-  // 8. Memoized search & filters
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return tickets;
     return tickets.filter(
-      (t) =>
-        t.customer_name?.toLowerCase().includes(q) ||
-        t.issue_description?.toLowerCase().includes(q)
+      (tk) =>
+        tk.customer_name?.toLowerCase().includes(q) ||
+        tk.issue_description?.toLowerCase().includes(q)
     );
   }, [tickets, search]);
 
   const counts: Record<TabKey, number> = useMemo(
     () => ({
       all: searched.length,
-      open: searched.filter((t) => t.status === "open").length,
-      in_progress: searched.filter((t) => t.status === "in_progress").length,
-      resolved: searched.filter((t) => t.status === "resolved").length,
+      open: searched.filter((tk) => tk.status === "open").length,
+      in_progress: searched.filter((tk) => tk.status === "in_progress").length,
+      resolved: searched.filter((tk) => tk.status === "resolved").length,
     }),
     [searched]
   );
@@ -244,7 +269,6 @@ export default function AdminDashboard() {
     });
   }, [tickets, activeTab, priorityFilter, search]);
 
-  // 9. Conditional loading guard
   if (loadingUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
@@ -260,7 +284,7 @@ export default function AdminDashboard() {
     >
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* 🔔 PROFESSIONAL FLOATING NOTIFICATION BANNER */}
+        {/* NOTIFICATION BANNER */}
         {newNotificationCount > 0 && (
           <div className="bg-indigo-600/90 border border-indigo-400/30 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-between backdrop-blur-md transition-all">
             <div className="flex items-center gap-3">
@@ -304,12 +328,18 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Language Switcher */}
             <button
               onClick={() => setLang((prev) => (prev === "en" ? "ar" : "en"))}
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-2"
             >
               🌐 {lang === "en" ? "العربية (AR)" : "English (EN)"}
+            </button>
+
+            <button
+              onClick={() => setUserRole((prev) => (prev === "agent" ? "supervisor" : "agent"))}
+              className="px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+            >
+              {userRole === "supervisor" ? "🛡️ Supervisor View" : "🎧 Agent View"}
             </button>
 
             {userEmail && (
@@ -342,7 +372,7 @@ export default function AdminDashboard() {
           </div>
         </header>
 
-        {/* 📊 OPTION 3: REAL-TIME BPO ANALYTICS METRICS HEADER */}
+        {/* METRICS */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-slate-800/80 border border-slate-700/60 p-3.5 rounded-xl">
             <p className="text-slate-400 text-xs font-medium">{t.totalTickets}</p>
@@ -445,7 +475,8 @@ export default function AdminDashboard() {
             {visibleTickets.map((ticket) => (
               <div
                 key={ticket.id}
-                className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-600"
+                onClick={() => openTicketDrawer(ticket)}
+                className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-indigo-500/50 cursor-pointer"
               >
                 <div className="space-y-1 max-w-2xl">
                   <div className="flex items-center gap-3 flex-wrap">
@@ -461,8 +492,8 @@ export default function AdminDashboard() {
                     }`}>
                       {ticket.priority || 'normal'}
                     </span>
-                    <span className="text-xs text-slate-400">
-                      {new Date(ticket.created_at).toLocaleTimeString([], {
+                    <span dir="ltr" className="text-xs text-slate-400">
+                      {new Date(ticket.created_at).toLocaleTimeString(lang === "ar" ? "ar-EG-u-nu-latn" : "en-US", {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -474,14 +505,39 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {userRole === "supervisor" && (
-                    <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md font-medium">
-                      {t.assignedTo} {ticket.assigned_agent || t.unassigned}
-                    </span>
+                  {/* Supervisor Interactive Assignment Dropdown */}
+                  {userRole === "supervisor" ? (
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-xs text-amber-400 font-medium">{t.assignedTo || "Assigned:"}</span>
+                      <select
+                        value={ticket.assigned_agent || ""}
+                        onChange={(e) => {
+                          const newAgent = e.target.value;
+                          setTickets((prev) =>
+                            prev.map((tk) => (tk.id === ticket.id ? { ...tk, assigned_agent: newAgent } : tk))
+                          );
+                          assignTicketAgent(ticket.id, newAgent);
+                        }}
+                        className="bg-slate-900 border border-amber-500/30 text-amber-300 text-xs rounded-lg p-1.5 focus:ring-2 focus:ring-amber-500 outline-none"
+                      >
+                        <option value="">{t.unassigned || "Unassigned"}</option>
+                        <option value="agent.test@bpo-middleeast.com">agent.test@bpo-middleeast.com</option>
+                        <option value="agent.egypt@bpo-middleeast.com">agent.egypt@bpo-middleeast.com</option>
+                        <option value="agent.gulf@bpo-middleeast.com">agent.gulf@bpo-middleeast.com</option>
+                      </select>
+                    </div>
+                  ) : (
+                    ticket.assigned_agent && (
+                      <span className="text-xs text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">
+                        {t.assignedTo || "Assigned:"} {ticket.assigned_agent}
+                      </span>
+                    )
                   )}
 
+                  {/* Status Dropdown with stopPropagation */}
                   <select
                     value={ticket.status}
+                    onClick={(e) => e.stopPropagation()}
                     onChange={(e) => updateStatus(ticket.id, e.target.value)}
                     className="bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
@@ -495,6 +551,99 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+{/* 🤖 OPTION C: AI COPILOT TICKET REPLY DRAWER */}
+      {selectedTicket && (
+        <div 
+          onClick={() => setSelectedTicket(null)}
+          className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm transition-opacity duration-300 animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl overflow-y-auto p-6 transition-transform duration-300 ease-in-out animate-in slide-in-from-right"
+          >
+            
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <span className="text-xs uppercase font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-md">
+                  AI Copilot & Audit Trail
+                </span>
+                <h2 className="text-lg font-bold text-white mt-2">{selectedTicket?.customer_name}</h2>
+                <p className="text-xs text-slate-400">Ticket ID: {selectedTicket?.id}</p>
+              </div>
+              <button
+                onClick={() => setSelectedTicket(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-sm font-semibold transition"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Ticket Issue Summary Box */}
+            <div className="bg-slate-800/50 border border-slate-700/60 p-4 rounded-xl my-4 space-y-2">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Original Issue Description</p>
+              <p className="text-sm text-slate-200" dir="auto">{selectedTicket?.issue_description}</p>
+              
+              <button
+                onClick={() => {
+                  if (!selectedTicket) return;
+                  setAiGenerating(true);
+                  setTimeout(() => {
+                    setReplyText(`Hello ${selectedTicket.customer_name},\n\nThank you for reaching out to Middle East Support Operations. We have reviewed your report regarding "${selectedTicket.issue_description.slice(0, 40)}..." and our engineering team is actively investigating the cluster status. We will provide an update shortly.\n\nBest regards,\nBPO Support Team`);
+                    setAiGenerating(false);
+                  }, 800);
+                }}
+                disabled={aiGenerating}
+                className="mt-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-2 shadow-md"
+              >
+                <span>✨ {aiGenerating ? "Generating Smart Reply..." : "Generate AI Draft Response"}</span>
+              </button>
+            </div>
+
+            {/* Conversation Audit History */}
+            <div className="flex-1 space-y-3 my-2">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Activity & Reply Audit Log</p>
+              {replies.length === 0 ? (
+                <p className="text-xs text-slate-500 italic bg-slate-950/40 p-3 rounded-lg border border-slate-800">No previous replies recorded yet. Start the conversation below.</p>
+              ) : (
+                replies.map((rep, idx) => (
+                  <div key={idx} className={`p-3 rounded-xl border text-sm ${rep.sender_type === 'agent' ? 'bg-indigo-950/30 border-indigo-500/30 text-indigo-200 ml-4' : 'bg-slate-800/40 border-slate-700/50 text-slate-300 mr-4'}`}>
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1 font-medium">
+                      <span>👤 {rep.sender_email || rep.sender_type}</span>
+                      <span>{new Date(rep.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <p dir="auto">{rep.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Reply Input & Approval Action */}
+            <div className="border-t border-slate-800 pt-4 mt-auto space-y-3">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">Draft / Edit Reply (Human-in-the-Loop)</label>
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Type your response or generate an AI draft..."
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                dir="auto"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] text-slate-400">🔒 AI-assisted; reviewed & approved by agent.</span>
+                <button
+                  onClick={handleSendReply}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg flex items-center gap-2"
+                >
+                  <span>Approve & Send Reply</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

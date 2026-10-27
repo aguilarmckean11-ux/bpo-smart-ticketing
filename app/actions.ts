@@ -60,3 +60,57 @@ export async function updateTicketStatus(id: string, status: string) {
     return { success: false, error: err.message }
   }
 }
+
+// 🟢 NEW: Server action to assign or reassign a ticket to a BPO agent
+export async function assignTicketAgent(ticketId: string, agentEmail: string) {
+  try {
+    const { error } = await supabase
+      .from('tickets')
+      .update({ assigned_agent: agentEmail })
+      .eq('id', ticketId)
+
+    if (error) throw error
+    return { success: true }
+  } catch (err: any) {
+    console.error('Error assigning ticket agent:', err)
+    return { success: false, error: err.message }
+  }
+}
+
+export async function getTicketReplies(ticketId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('ticket_replies')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+
+    if (error) throw error
+    return { success: true, data }
+  } catch (err: any) {
+    console.error('Error fetching ticket replies:', err)
+    return { success: false, error: err.message }
+  }
+}
+
+export async function addTicketReply(ticketId: string, senderType: string, senderEmail: string, message: string) {
+  try {
+    const { data, error } = await supabase
+      .from('ticket_replies')
+      .insert([
+        {
+          ticket_id: ticketId,
+          sender_type: senderType,
+          sender_email: senderEmail,
+          message: message,
+        },
+      ])
+      .select()
+
+    if (error) throw error
+    return { success: true, data }
+  } catch (err: any) {
+    console.error('Error adding ticket reply:', err)
+    return { success: false, error: err.message }
+  }
+}
