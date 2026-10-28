@@ -114,3 +114,34 @@ export async function addTicketReply(ticketId: string, senderType: string, sende
     return { success: false, error: err.message }
   }
 }
+
+// Example inside your ticket approval handler / server action
+async function handleApproveAndDispatch(ticketId: string, approvedReplyText: string, agentId: string) {
+  // 1. Insert the approved reply into your activity & audit log table
+  const { error: auditError } = await supabase
+    .from('ticket_audit_logs') // or your relevant log table name
+    .insert([
+      {
+        ticket_id: ticketId,
+        sender_id: agentId,
+        message: approvedReplyText,
+        type: 'ai_approved_reply',
+        created_at: new Date().toISOString(),
+      }
+    ]);
+
+  if (auditError) throw auditError;
+
+  // 2. AUTO-STATUS PROGRESSION: Automatically update the ticket status
+  const { error: statusError } = await supabase
+    .from('tickets')
+    .update({ 
+      status: 'in_progress', // or 'resolved' depending on your workflow choice
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', ticketId);
+
+  if (statusError) throw statusError;
+
+  return { success: true };
+}

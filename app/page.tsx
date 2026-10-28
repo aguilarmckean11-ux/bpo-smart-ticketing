@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { submitTicket } from "./actions";
+import UserAIAssistant from "@/components/UserAIAssistant";
 
 export default function CustomerForm() {
   const [name, setName] = useState("");
@@ -102,7 +103,10 @@ export default function CustomerForm() {
         >
           {loading ? "Sending ticket..." : "Send ticket"}
         </button>
-      </form>
-    </div>
+    </form>
+
+    {/* Floating User AI Assistant */}
+    <UserAIAssistant />
+  </div>
   );
 }
