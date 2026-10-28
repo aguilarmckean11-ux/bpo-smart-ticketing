@@ -17,6 +17,12 @@
 </p>
 <br/>
 
+## 🧪 Quick Test / Demo Credentials
+
+If you are reviewing this repository and want to test the live application:
+- **Demo Role Switcher:** Use the in-app view switcher toggle in the top header (`🎧 Agent View` / `🛡️ Supervisor View`) to test role-based access control (RBAC).
+- **Test Account Email:** `agent.test@bpo-middleeast.com`
+
 ## Features
 
 - Works across the entire [Next.js](https://nextjs.org) stack
