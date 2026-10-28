@@ -145,3 +145,25 @@ async function handleApproveAndDispatch(ticketId: string, approvedReplyText: str
 
   return { success: true };
 }
+
+// Add this server action to fetch live ticket status for the AI Copilot
+export async function lookupTicketByQuery(query: string) {
+  try {
+    const searchTerm = query.trim();
+
+    const { data, error } = await supabase
+      .from('tickets')
+      .select('*')
+      .or(`id.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%`)
+      .limit(1);
+
+    if (error || !data || data.length === 0) {
+      return { success: false, error: "Ticket not found" };
+    }
+
+    return { success: true, data: data[0] };
+  } catch (err) {
+    console.error("Error looking up ticket:", err);
+    return { success: false, error: "Database error" };
+  }
+}

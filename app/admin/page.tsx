@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { formatRelativeTime } from '@/lib/formatTime';
 import { getTickets, updateTicketStatus, assignTicketAgent, getTicketReplies, addTicketReply } from "../actions";
+import { exportToPDF } from '@/lib/exportHelpers';
+import FileUpload from "@/components/FileUpload";
 
 type Ticket = {
   id: string;
@@ -13,6 +16,15 @@ type Ticket = {
   status: string;
   priority?: string;
   assigned_agent?: string;
+};
+
+type NotificationItem = {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  createdAt: string;
+  unread: boolean;
 };
 
 type TabKey = "all" | "open" | "in_progress" | "resolved";
@@ -56,7 +68,7 @@ const DICTIONARY = {
     searchPlaceholder: "البحث باسم العميل أو الوصف",
     refreshBtn: "تحديث القائمة",
     signOut: "تسجيل الخروج",
-    newNotification: "تم استلام تذكرة دعم جديدة!",
+    newNotification: "تم استلاستلام تذكرة دعم جديدة!",
     newTicketsAdded: "تذاكر جديدة أضيفت للقائمة!",
     dismissRefresh: "تجاهل / تحديث القائمة",
     noTickets: "لم يتم العثور على تذاكر في قائمة الانتظار.",
@@ -96,7 +108,85 @@ export default function AdminDashboard() {
   // Notification state
   const [newNotificationCount, setNewNotificationCount] = useState<number>(0);
   const [notificationMessage, setNotificationMessage] = useState<string>("");
+  
+  // Enhanced Notification Feed State (Compiler-Safe & Persistent)
+  const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedData = localStorage.getItem("bpo_notifications_persistent_state");
+        if (savedData) {
+          return JSON.parse(savedData) as NotificationItem[];
+        }
+      } catch (e) {
+        console.error("Failed to load notifications from localStorage:", e);
+      }
+    }
+    return [
+      {
+        id: 1,
+        type: "escalation",
+        title: "Tier-2 Support Escalation",
+        message: "AI Copilot routed Ticket #TK-1001 to Tier-2 Technical Queue.",
+        createdAt: "",
+        unread: true,
+      },
+      {
+        id: 2,
+        type: "status",
+        title: "Customer Status Check",
+        message: "Omar Al-Hassan checked ticket resolution status via AI Copilot.",
+        createdAt: "",
+        unread: true,
+      },
+      {
+        id: 3,
+        type: "compliance",
+        title: "Audit Report Generated",
+        message: "Supervisor generated a compliance PDF report for review.",
+        createdAt: "",
+        unread: false,
+      },
+    ];
+  });
 
+  // Generate missing timestamps safely on client mount without triggering Next.js prerender warnings
+  useEffect(() => {
+    const now = Date.now();
+    setNotifications((prev: NotificationItem[]) =>
+      prev.map((n, index) => {
+        if (n.createdAt) return n; // Retain saved timestamp from localStorage if available
+        const offset = index === 0 ? 2 * 60 * 1000 : index === 1 ? 15 * 60 * 1000 : 60 * 60 * 1000;
+        return {
+          ...n,
+          createdAt: new Date(now - offset).toISOString(),
+        };
+      })
+    );
+  }, []);
+
+  // Save notifications state to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("bpo_notifications_persistent_state", JSON.stringify(notifications));
+      } catch (e) {
+        console.error("Failed to save notifications to localStorage:", e);
+      }
+    }
+  }, [notifications]);
+
+  // Helper to mark all notifications as read & save to localStorage
+  const markNotificationsRead = () => {
+    setNotifications((prev: NotificationItem[]) => {
+      const updated = prev.map((n: NotificationItem) => ({ ...n, unread: false }));
+      const readIds = updated.map((n: NotificationItem) => n.id);
+      localStorage.setItem("bpo_read_notification_ids", JSON.stringify(readIds));
+      return updated;
+    });
+  };
+
+  const unreadCount = notifications.filter((n: NotificationItem) => n.unread).length;
   const t = DICTIONARY[lang];
 
   const playNotificationSound = () => {
@@ -334,6 +424,92 @@ export default function AdminDashboard() {
             >
               🌐 {lang === "en" ? "العربية (AR)" : "English (EN)"}
             </button>
+            
+            {/* Export Compliance PDF Button */}
+            <button
+              type="button"
+              onClick={() =>
+                exportToPDF({
+                  title: "Supervisor Compliance Audit Report",
+                  generatedBy: "Admin Supervisor",
+                  date: new Date().toLocaleDateString(),
+                  tickets: tickets.map((t: any) => ({
+                    id: t.id,
+                    customer: t.customer_name || "Customer",
+                    issue: t.issue_description || "No description",
+                    status: t.status || "open",
+                    priority: t.priority || "normal",
+                  })),
+                })
+              }
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center gap-2"
+            >
+              📄 Export Compliance PDF
+            </button>
+
+            {/* Notification Bell with Badge & Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  const nextState = !showNotifications;
+                  setShowNotifications(nextState);
+                  if (nextState) {
+                    markNotificationsRead();
+                  }
+                }}
+                className="relative bg-slate-800 hover:bg-slate-700 text-slate-200 p-2.5 rounded-lg transition shadow-sm border border-slate-700 flex items-center justify-center text-sm"
+                title="Notifications & Escalations"
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown Drawer */}
+              {showNotifications && (
+                <div className="absolute left-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden text-slate-100">
+                  <div className="p-3 bg-slate-800/80 border-b border-slate-700 flex justify-between items-center">
+                    <span className="font-semibold text-sm">System & Tier-2 Alerts</span>
+                    <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-medium">
+                      {notifications.length} Total
+                    </span>
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
+                    {notifications.map((notif: NotificationItem) => (
+                      <div key={notif.id} className="p-3 hover:bg-slate-800/50 transition text-left">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-xs font-semibold text-indigo-400">{notif.title}</span>
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400" dir="ltr">
+                            <span className="inline-block">{formatRelativeTime(notif.createdAt)}</span>
+                            {!notif.unread && (
+                              <span className="text-emerald-400 font-bold tracking-tighter" title="Read">
+                                ✔️✔️
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed">{notif.message}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="p-2 bg-slate-800/50 border-t border-slate-700 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowNotifications(false)}
+                      className="text-xs text-slate-400 hover:text-slate-200 font-medium"
+                    >
+                      Close Drawer
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={() => setUserRole((prev) => (prev === "agent" ? "supervisor" : "agent"))}
@@ -343,8 +519,8 @@ export default function AdminDashboard() {
             </button>
 
             {userEmail && (
-              <span className="text-sm text-slate-400 font-medium bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
-                👤 {userEmail}
+              <span className="text-sm text-slate-400 font-medium bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg" dir="ltr">
+                👤 <span className="inline-block">{userEmail}</span>
               </span>
             )}
 
@@ -480,7 +656,7 @@ export default function AdminDashboard() {
               >
                 <div className="space-y-1 max-w-2xl">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <h3 className="font-semibold text-white">
+                    <h3 className="font-semibold text-white inline-block" dir="ltr">
                       {ticket.customer_name}
                     </h3>
                     <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
@@ -492,11 +668,12 @@ export default function AdminDashboard() {
                     }`}>
                       {ticket.priority || 'normal'}
                     </span>
-                    <span dir="ltr" className="text-xs text-slate-400">
-                      {new Date(ticket.created_at).toLocaleTimeString(lang === "ar" ? "ar-EG-u-nu-latn" : "en-US", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                    <span 
+                      className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-900/80 text-slate-400 border border-slate-700/80 inline-flex items-center gap-1"
+                      title={new Date(ticket.created_at).toLocaleString()}
+                      dir="ltr"
+                    >
+                      <span className="inline-block">⏱️ {formatRelativeTime(ticket.created_at || new Date())}</span>
                     </span>
                   </div>
                   <p dir="auto" className="text-slate-300 text-sm">
@@ -528,8 +705,8 @@ export default function AdminDashboard() {
                     </div>
                   ) : (
                     ticket.assigned_agent && (
-                      <span className="text-xs text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">
-                        {t.assignedTo || "Assigned:"} {ticket.assigned_agent}
+                      <span className="text-xs text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium inline-block" dir="ltr">
+                        {t.assignedTo || "Assigned:"} <span className="inline-block">{ticket.assigned_agent}</span>
                       </span>
                     )
                   )}
@@ -552,7 +729,7 @@ export default function AdminDashboard() {
         )}
       </div>
 
-{/* 🤖 OPTION C: AI COPILOT TICKET REPLY DRAWER */}
+      {/* 🤖 OPTION C: AI COPILOT TICKET REPLY DRAWER */}
       {selectedTicket && (
         <div 
           onClick={() => setSelectedTicket(null)}
@@ -569,8 +746,8 @@ export default function AdminDashboard() {
                 <span className="text-xs uppercase font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-md">
                   AI Copilot & Audit Trail
                 </span>
-                <h2 className="text-lg font-bold text-white mt-2">{selectedTicket?.customer_name}</h2>
-                <p className="text-xs text-slate-400">Ticket ID: {selectedTicket?.id}</p>
+                <h2 className="text-lg font-bold text-white mt-2 inline-block" dir="ltr">{selectedTicket?.customer_name}</h2>
+                <p className="text-xs text-slate-400" dir="ltr">Ticket ID: {selectedTicket?.id}</p>
               </div>
               <button
                 onClick={() => setSelectedTicket(null)}
@@ -601,6 +778,16 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {/* Secure Document Upload Component */}
+            {selectedTicket && (
+              <FileUpload 
+                ticketId={selectedTicket.id} 
+                onUploadComplete={(path) => {
+                  console.log("File uploaded successfully to path:", path);
+                }} 
+              />
+            )}
+
             {/* Conversation Audit History */}
             <div className="flex-1 space-y-3 my-2">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Activity & Reply Audit Log</p>
@@ -609,9 +796,9 @@ export default function AdminDashboard() {
               ) : (
                 replies.map((rep, idx) => (
                   <div key={idx} className={`p-3 rounded-xl border text-sm ${rep.sender_type === 'agent' ? 'bg-indigo-950/30 border-indigo-500/30 text-indigo-200 ml-4' : 'bg-slate-800/40 border-slate-700/50 text-slate-300 mr-4'}`}>
-                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1 font-medium">
-                      <span>👤 {rep.sender_email || rep.sender_type}</span>
-                      <span>{new Date(rep.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1 font-medium" dir="ltr">
+                      <span className="inline-block">👤 {rep.sender_email || rep.sender_type}</span>
+                      <span className="inline-block">{new Date(rep.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                     <p dir="auto">{rep.message}</p>
                   </div>

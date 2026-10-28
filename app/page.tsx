@@ -7,7 +7,7 @@ import UserAIAssistant from "@/components/UserAIAssistant";
 export default function CustomerForm() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("normal"); // Added priority state
+  const [priority, setPriority] = useState("normal");
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +19,13 @@ export default function CustomerForm() {
     setSuccessMessage("");
 
     try {
-      // Pass priority along with name and description
       const result = await submitTicket({ name, description, priority });
 
       if (result.success) {
         setSuccessMessage("Ticket submitted successfully!");
         setName("");
         setDescription("");
-        setPriority("normal"); // Reset priority
+        setPriority("normal");
       } else {
         setError(result.error || "Failed to submit ticket.");
       }
@@ -103,10 +102,10 @@ export default function CustomerForm() {
         >
           {loading ? "Sending ticket..." : "Send ticket"}
         </button>
-    </form>
+      </form>
 
-    {/* Floating User AI Assistant */}
-    <UserAIAssistant />
-  </div>
+      {/* Floating User AI Assistant */}
+      <UserAIAssistant />
+    </div>
   );
 }
