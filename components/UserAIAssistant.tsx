@@ -2,8 +2,6 @@
 
 import React, { useState } from 'react';
 import { lookupTicketByQuery } from '@/app/actions';
-// Import your server action for live database lookups
-// import { lookupTicketByQuery } from '@/app/admin/actions'; // Adjust path as needed
 
 export default function UserAIAssistant() {
   const [isOpen, setIsOpen] = useState(false);
@@ -12,6 +10,9 @@ export default function UserAIAssistant() {
   ]);
   const [input, setInput] = useState('');
   const [awaitingTicketLookup, setAwaitingTicketLookup] = useState(false);
+  
+  // Dynamic suggestion state based on current context
+  const [contextMode, setContextMode] = useState<'default' | 'password' | 'status' | 'docs'>('default');
 
   const handleSendQuery = async (textToSend: string) => {
     if (!textToSend.trim()) return;
@@ -23,6 +24,7 @@ export default function UserAIAssistant() {
     // If waiting for ticket lookup input
     if (awaitingTicketLookup) {
       setAwaitingTicketLookup(false);
+      setContextMode('default');
       
       try {
         const res = await lookupTicketByQuery(userText);
@@ -59,27 +61,75 @@ Our support team is actively processing your request. We appreciate your patienc
 
     const lower = userText.toLowerCase();
 
+    // 1. Ticket status check trigger
     if (lower.includes('check') && lower.includes('status')) {
       setAwaitingTicketLookup(true);
+      setContextMode('status');
       setTimeout(() => {
         setMessages((prev) => [
           ...prev,
           {
             sender: 'ai',
-            text: 'I would be happy to check your live ticket status! Please reply with your **Ticket ID** (e.g., TK-1001) or your **Full Name**.',
+            text: 'I would be happy to check your live ticket status! Please reply with your **Ticket ID** or your **Full Name**.',
           },
         ]);
       }, 800);
       return;
     }
 
-    // Default response
+    // 2. Greetings (EN / AR)
+    if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey') || lower.includes('مرحباً') || lower.includes('أهلاً')) {
+      setContextMode('default');
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: 'Hello! 👋 How can I help you navigate our services today? You can ask me about checking your ticket status, password resets, or API guidelines.',
+          },
+        ]);
+      }, 600);
+      return;
+    }
+
+    // 3. Password / Login FAQ
+    if (lower.includes('password') || lower.includes('login') || lower.includes('sign in')) {
+      setContextMode('password');
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: '🔑 **Password Help:** You can reset your password instantly by clicking "Forgot Password" on the login portal or clearing your local session cookies. Would you like me to guide you through submitting a formal ticket instead?',
+          },
+        ]);
+      }, 800);
+      return;
+    }
+
+    // 4. Upload Docs / Compliance FAQ
+    if (lower.includes('upload') || lower.includes('doc') || lower.includes('compliance')) {
+      setContextMode('docs');
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: '📁 **Document Uploads:** You can securely attach compliance files (up to 10MB) directly through the support ticket form or inside your active agent reply drawer using signed URLs.',
+          },
+        ]);
+      }, 800);
+      return;
+    }
+
+    // 5. Intelligent Conversational Fallback
+    setContextMode('default');
     setTimeout(() => {
       setMessages((prev) => [
         ...prev,
         {
           sender: 'ai',
-          text: 'I have logged your request and notified our Tier-2 support team. Your inquiry is currently being processed.',
+          text: `I understand you're inquiring about "${userText}". While I can assist with general FAQs and status checks, if you need formal assistance from our Tier-2 support team, please fill out the main intake form on this page so we can log your request!`,
         },
       ]);
     }, 1000);
@@ -105,7 +155,7 @@ Our support team is actively processing your request. We appreciate your patienc
       )}
 
       {isOpen && (
-        <div className="w-80 sm:w-96 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col h-[500px] overflow-hidden transition-all">
+        <div className="w-80 sm:w-96 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col h-[520px] overflow-hidden transition-all">
           <div className="bg-indigo-600 text-white p-4 flex justify-between items-center">
             <div>
               <h3 className="font-semibold text-lg">Support AI Copilot</h3>
@@ -138,19 +188,74 @@ Our support team is actively processing your request. We appreciate your patienc
             ))}
           </div>
 
-          <div className="p-2 bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 flex gap-2 overflow-x-auto text-xs">
-            <button
-              onClick={() => handleSendQuery('Check my ticket status')}
-              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1 rounded-full whitespace-nowrap hover:bg-gray-50 dark:text-gray-300 font-medium"
-            >
-              📊 Check Ticket Status
-            </button>
-            <button
-              onClick={() => handleSendQuery('Upload compliance document')}
-              className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1 rounded-full whitespace-nowrap hover:bg-gray-50 dark:text-gray-300 font-medium"
-            >
-              📁 Upload Docs
-            </button>
+          {/* Contextual Populated Grid Panel (No Horizontal Slider) */}
+          <div className="p-3 bg-gray-100 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+            <div className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold uppercase tracking-wider mb-2">
+              ✨ Suggested Actions:
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {contextMode === 'default' && (
+                <>
+                  <button
+                    onClick={() => handleSendQuery('Check my ticket status')}
+                    className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-gray-700 dark:text-gray-300 font-medium transition flex-1 text-center"
+                  >
+                    📊 Check Status
+                  </button>
+                  <button
+                    onClick={() => handleSendQuery('I forgot my password')}
+                    className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-gray-700 dark:text-gray-300 font-medium transition flex-1 text-center"
+                  >
+                    🔑 Password Help
+                  </button>
+                  <button
+                    onClick={() => handleSendQuery('Upload compliance document')}
+                    className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-gray-700 dark:text-gray-300 font-medium transition w-full text-center"
+                  >
+                    📁 Upload Compliance Docs
+                  </button>
+                </>
+              )}
+
+              {contextMode === 'password' && (
+                <>
+                  <button
+                    onClick={() => handleSendQuery('Clear browser cookies & retry')}
+                    className="bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-300 dark:border-indigo-700 px-3 py-1.5 rounded-lg text-indigo-700 dark:text-indigo-300 font-medium transition flex-1 text-center"
+                  >
+                    ✨ Clear Cookies Guide
+                  </button>
+                  <button
+                    onClick={() => handleSendQuery('Escalate to human agent')}
+                    className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:text-gray-300 font-medium transition flex-1 text-center"
+                  >
+                    🎧 Talk to Human
+                  </button>
+                </>
+              )}
+
+              {contextMode === 'status' && (
+                <button
+                  onClick={() => {
+                    setAwaitingTicketLookup(false);
+                    setContextMode('default');
+                    handleSendQuery('Cancel status check');
+                  }}
+                  className="bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 px-3 py-1.5 rounded-lg text-rose-600 dark:text-rose-300 font-medium transition w-full text-center"
+                >
+                  ❌ Cancel Lookup
+                </button>
+              )}
+
+              {contextMode === 'docs' && (
+                <button
+                  onClick={() => handleSendQuery('What file formats are accepted?')}
+                  className="bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-300 dark:border-indigo-700 px-3 py-1.5 rounded-lg text-indigo-700 dark:text-indigo-300 font-medium transition w-full text-center"
+                >
+                  📋 Accepted Formats (PDF/CSV)
+                </button>
+              )}
+            </div>
           </div>
 
           <form
