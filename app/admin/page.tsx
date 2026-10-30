@@ -16,10 +16,11 @@ type Ticket = {
   status: string;
   priority?: string;
   assigned_agent?: string;
+  is_archived?: boolean;
 };
 
 type NotificationItem = {
-  id: number;
+  id: string | number;
   type: string;
   title: string;
   message: string;
@@ -27,7 +28,7 @@ type NotificationItem = {
   unread: boolean;
 };
 
-type TabKey = "all" | "open" | "in_progress" | "resolved";
+type TabKey = "all" | "open" | "in_progress" | "resolved" | "archived";
 type UserRole = "agent" | "supervisor";
 type Language = "en" | "ar";
 
@@ -39,6 +40,7 @@ const DICTIONARY = {
     open: "Open",
     in_progress: "In Progress",
     resolved: "Resolved",
+    archived: "Archived",
     priorityLabel: "Priority:",
     searchPlaceholder: "Search name or description",
     refreshBtn: "Refresh Queue",
@@ -56,6 +58,7 @@ const DICTIONARY = {
     highPriority: "High Priority",
     resolvedToday: "Resolved Today",
     avgHandleTime: "Est. Avg Resolution",
+    archiveBtn: "Archive",
   },
   ar: {
     title: "لوحة تحكم وكيل خدمات BPO",
@@ -64,11 +67,12 @@ const DICTIONARY = {
     open: "مفتوح",
     in_progress: "قيد التنفيذ",
     resolved: "مكتمل",
+    archived: "المؤرشفة",
     priorityLabel: "الأولوية:",
     searchPlaceholder: "البحث باسم العميل أو الوصف",
     refreshBtn: "تحديث القائمة",
     signOut: "تسجيل الخروج",
-    newNotification: "تم استلاستلام تذكرة دعم جديدة!",
+    newNotification: "تم استلام تذكرة دعم جديدة!",
     newTicketsAdded: "تذاكر جديدة أضيفت للقائمة!",
     dismissRefresh: "تجاهل / تحديث القائمة",
     noTickets: "لم يتم العثور على تذاكر في قائمة الانتظار.",
@@ -81,6 +85,7 @@ const DICTIONARY = {
     highPriority: "أولوية قصوى",
     resolvedToday: "تم حلها اليوم",
     avgHandleTime: "متوسط وقت الحل",
+    archiveBtn: "أرشفة",
   },
 };
 
@@ -114,7 +119,7 @@ export default function AdminDashboard() {
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     if (typeof window !== "undefined") {
       try {
-        const savedData = localStorage.getItem("bpo_notifications_persistent_state");
+        const savedData = localStorage.getItem("bpo_notifications_persistent_state_v2");
         if (savedData) {
           return JSON.parse(savedData) as NotificationItem[];
         }
@@ -139,24 +144,16 @@ export default function AdminDashboard() {
         createdAt: "",
         unread: true,
       },
-      {
-        id: 3,
-        type: "compliance",
-        title: "Audit Report Generated",
-        message: "Supervisor generated a compliance PDF report for review.",
-        createdAt: "",
-        unread: false,
-      },
     ];
   });
 
-  // Generate missing timestamps safely on client mount without triggering Next.js prerender warnings
+  // Safe client-side timestamp generation to prevent server prerender errors
   useEffect(() => {
     const now = Date.now();
     setNotifications((prev: NotificationItem[]) =>
       prev.map((n, index) => {
-        if (n.createdAt) return n; // Retain saved timestamp from localStorage if available
-        const offset = index === 0 ? 2 * 60 * 1000 : index === 1 ? 15 * 60 * 1000 : 60 * 60 * 1000;
+        if (n.createdAt) return n;
+        const offset = index === 0 ? 2 * 60 * 1000 : 15 * 60 * 1000;
         return {
           ...n,
           createdAt: new Date(now - offset).toISOString(),
@@ -169,21 +166,17 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        localStorage.setItem("bpo_notifications_persistent_state", JSON.stringify(notifications));
+        localStorage.setItem("bpo_notifications_persistent_state_v2", JSON.stringify(notifications));
       } catch (e) {
         console.error("Failed to save notifications to localStorage:", e);
       }
     }
   }, [notifications]);
 
-  // Helper to mark all notifications as read & save to localStorage
   const markNotificationsRead = () => {
-    setNotifications((prev: NotificationItem[]) => {
-      const updated = prev.map((n: NotificationItem) => ({ ...n, unread: false }));
-      const readIds = updated.map((n: NotificationItem) => n.id);
-      localStorage.setItem("bpo_read_notification_ids", JSON.stringify(readIds));
-      return updated;
-    });
+    setNotifications((prev: NotificationItem[]) =>
+      prev.map((n: NotificationItem) => ({ ...n, unread: false }))
+    );
   };
 
   const unreadCount = notifications.filter((n: NotificationItem) => n.unread).length;
@@ -241,6 +234,20 @@ export default function AdminDashboard() {
               setNotificationMessage(
                 diff === 1 ? t.newNotification : `${diff} ${t.newTicketsAdded}`
               );
+
+              // Collision-proof unique IDs for notification feed items
+              const latestNewTickets = result.data.slice(0, diff);
+              setNotifications((prevNotifs) => {
+                const newAlerts = latestNewTickets.map((tk: Ticket, idx: number) => ({
+                  id: `${Date.now()}-${idx}-${tk.id || Math.random().toString(36).substr(2, 5)}`,
+                  type: "ticket",
+                  title: "New Customer Support Ticket",
+                  message: `Ticket #${tk.id?.slice(0, 6) || 'NEW'} submitted by ${tk.customer_name || "Customer"}: "${tk.issue_description?.slice(0, 40)}..."`,
+                  createdAt: new Date().toISOString(),
+                  unread: true,
+                }));
+                return [...newAlerts, ...prevNotifs];
+              });
             }
           }
           return result.data;
@@ -284,6 +291,27 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleArchiveTicket = async (id: string) => {
+    setTickets((prev) =>
+      prev.map((tk) => (tk.id === id ? { ...tk, is_archived: true } : tk))
+    );
+
+    try {
+      const { error } = await supabase
+        .from("tickets")
+        .update({ is_archived: true })
+        .eq("id", id);
+
+      if (error) {
+        console.error("Failed to archive ticket:", error);
+        fetchTickets(false);
+      }
+    } catch (err) {
+      console.error("Exception archiving ticket:", err);
+      fetchTickets(false);
+    }
+  };
+
   const openTicketDrawer = async (ticket: Ticket) => {
     setSelectedTicket(ticket);
     setReplyText("");
@@ -312,10 +340,10 @@ export default function AdminDashboard() {
   };
 
   const metrics = useMemo(() => {
-    const total = tickets.length;
-    const openCount = tickets.filter((tk) => tk.status === "open").length;
-    const highPriorityCount = tickets.filter((tk) => tk.priority?.toLowerCase() === "high").length;
-    const resolvedCount = tickets.filter((tk) => tk.status === "resolved").length;
+    const total = tickets.filter(tk => !tk.is_archived).length;
+    const openCount = tickets.filter((tk) => !tk.is_archived && tk.status === "open").length;
+    const highPriorityCount = tickets.filter((tk) => !tk.is_archived && tk.priority?.toLowerCase() === "high").length;
+    const resolvedCount = tickets.filter((tk) => !tk.is_archived && tk.status === "resolved").length;
 
     return {
       total,
@@ -338,19 +366,29 @@ export default function AdminDashboard() {
 
   const counts: Record<TabKey, number> = useMemo(
     () => ({
-      all: searched.length,
-      open: searched.filter((tk) => tk.status === "open").length,
-      in_progress: searched.filter((tk) => tk.status === "in_progress").length,
-      resolved: searched.filter((tk) => tk.status === "resolved").length,
+      all: searched.filter((tk) => !tk.is_archived).length,
+      open: searched.filter((tk) => !tk.is_archived && tk.status === "open").length,
+      in_progress: searched.filter((tk) => !tk.is_archived && tk.status === "in_progress").length,
+      resolved: searched.filter((tk) => !tk.is_archived && tk.status === "resolved").length,
+      archived: searched.filter((tk) => tk.is_archived).length,
     }),
     [searched]
   );
 
   const visibleTickets = useMemo(() => {
     return tickets.filter((ticket) => {
-      const matchesStatus = activeTab === "all" || ticket.status === activeTab;
+      if (ticket.is_archived && activeTab !== "archived") return false;
+      if (!ticket.is_archived && activeTab === "archived") return false;
+
+      const matchesStatus =
+        activeTab === "all" ||
+        activeTab === "archived" ||
+        ticket.status === activeTab;
+        
       const ticketPriority = ticket.priority?.toLowerCase() || "normal";
-      const matchesPriority = priorityFilter === "all" || ticketPriority === priorityFilter;
+      const matchesPriority =
+        priorityFilter === "all" || ticketPriority === priorityFilter;
+        
       const matchesSearch =
         ticket.customer_name.toLowerCase().includes(search.toLowerCase()) ||
         ticket.issue_description.toLowerCase().includes(search.toLowerCase());
@@ -433,12 +471,12 @@ export default function AdminDashboard() {
                   title: "Supervisor Compliance Audit Report",
                   generatedBy: "Admin Supervisor",
                   date: new Date().toLocaleDateString(),
-                  tickets: tickets.map((t: any) => ({
-                    id: t.id,
-                    customer: t.customer_name || "Customer",
-                    issue: t.issue_description || "No description",
-                    status: t.status || "open",
-                    priority: t.priority || "normal",
+                  tickets: tickets.map((tk: any) => ({
+                    id: tk.id,
+                    customer: tk.customer_name || "Customer",
+                    issue: tk.issue_description || "No description",
+                    status: tk.status || "open",
+                    priority: tk.priority || "normal",
                   })),
                 })
               }
@@ -574,12 +612,14 @@ export default function AdminDashboard() {
 
         {/* FILTERS & SEARCH */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          
+          {/* MINIMALIST UNDERLINE TAB BAR */}
           <div
             role="tablist"
             aria-label="Filter tickets by status"
-            className="flex gap-2 overflow-x-auto pb-1"
+            className="flex items-center gap-6 border-b border-slate-800 overflow-x-auto w-full lg:w-auto"
           >
-            {(["all", "open", "in_progress", "resolved"] as TabKey[]).map((key) => {
+            {(["all", "open", "in_progress", "resolved", "archived"] as TabKey[]).map((key) => {
               const active = activeTab === key;
               return (
                 <button
@@ -588,22 +628,25 @@ export default function AdminDashboard() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(key)}
-                  className={`shrink-0 inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  className={`pb-3 text-xs font-semibold transition-all relative flex items-center gap-2 whitespace-nowrap outline-none ${
                     active
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-800/60 text-slate-300 border border-slate-700/60 hover:bg-slate-800"
+                      ? "text-indigo-400 font-bold"
+                      : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
-                  {t[key]}
+                  <span>{t[key]}</span>
                   <span
-                    className={`min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-xs font-semibold ${
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                       active
-                        ? "bg-white/20 text-white"
-                        : "bg-slate-900 text-slate-300"
+                        ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                        : "bg-slate-800 text-slate-400"
                     }`}
                   >
                     {counts[key]}
                   </span>
+                  {active && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-in fade-in" />
+                  )}
                 </button>
               );
             })}
@@ -722,6 +765,21 @@ export default function AdminDashboard() {
                     <option value="in_progress">{t.in_progress}</option>
                     <option value="resolved">{t.resolved}</option>
                   </select>
+
+                  {/* Archive Button for Resolved Tickets */}
+                  {ticket.status === "resolved" && !ticket.is_archived && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleArchiveTicket(ticket.id);
+                      }}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs px-2.5 py-2 rounded-lg transition"
+                      title="Move ticket to historical archive"
+                    >
+                      📁 {t.archiveBtn}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -729,7 +787,7 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* 🤖 OPTION C: AI COPILOT TICKET REPLY DRAWER */}
+      {/* 🤖 AI COPILOT TICKET REPLY DRAWER */}
       {selectedTicket && (
         <div 
           onClick={() => setSelectedTicket(null)}
@@ -757,7 +815,7 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* Ticket Issue Summary Box */}
+            {/* Ticket Issue Summary Box with Status-Aware AI Generator */}
             <div className="bg-slate-800/50 border border-slate-700/60 p-4 rounded-xl my-4 space-y-2">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Original Issue Description</p>
               <p className="text-sm text-slate-200" dir="auto">{selectedTicket?.issue_description}</p>
@@ -767,14 +825,25 @@ export default function AdminDashboard() {
                   if (!selectedTicket) return;
                   setAiGenerating(true);
                   setTimeout(() => {
-                    setReplyText(`Hello ${selectedTicket.customer_name},\n\nThank you for reaching out to Middle East Support Operations. We have reviewed your report regarding "${selectedTicket.issue_description.slice(0, 40)}..." and our engineering team is actively investigating the cluster status. We will provide an update shortly.\n\nBest regards,\nBPO Support Team`);
+                    let draftMessage = "";
+                    const status = selectedTicket.status;
+
+                    if (status === "resolved") {
+                      draftMessage = `Hello ${selectedTicket.customer_name},\n\nWe are pleased to inform you that your ticket regarding "${selectedTicket.issue_description.slice(0, 40)}..." has been successfully resolved by our engineering operations team.\n\nThank you for your patience and for choosing Middle East Support Operations. If you need any further assistance, please feel free to reach out.\n\nWarm regards,\nBPO Support Team`;
+                    } else if (status === "in_progress") {
+                      draftMessage = `Hello ${selectedTicket.customer_name},\n\nThis is an update regarding your ongoing support request ("${selectedTicket.issue_description.slice(0, 40)}..."). Our technical team is actively investigating the matter in your region, and we are working diligently toward a resolution.\n\nWe will keep you updated as we make progress.\n\nBest regards,\nBPO Support Team`;
+                    } else {
+                      draftMessage = `Hello ${selectedTicket.customer_name},\n\nThank you for reaching out to Middle East Support Operations. We have received your request regarding "${selectedTicket.issue_description.slice(0, 40)}..." and have queued it for review.\n\nOur team will follow up with you shortly.\n\nBest regards,\nBPO Support Team`;
+                    }
+
+                    setReplyText(draftMessage);
                     setAiGenerating(false);
                   }, 800);
                 }}
                 disabled={aiGenerating}
                 className="mt-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-2 shadow-md"
               >
-                <span>✨ {aiGenerating ? "Generating Smart Reply..." : "Generate AI Draft Response"}</span>
+                <span>✨ {aiGenerating ? "Generating Smart Reply..." : `Generate AI Draft (${selectedTicket?.status.replace('_', ' ')})`}</span>
               </button>
             </div>
 
