@@ -128,3 +128,36 @@ export function exportToPDF(data: ComplianceReportData) {
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
+
+export function exportTicketsToCSV(tickets: any[], filename = 'archived-tickets-report.csv') {
+  if (!tickets || tickets.length === 0) {
+    alert('No archived tickets available to export.');
+    return;
+  }
+
+  const headers = ['Ticket ID', 'Customer Name', 'Issue Description', 'Status', 'Priority', 'Assigned Agent', 'Created At'];
+  
+  const rows = tickets.map(tk => [
+    tk.id,
+    `"${(tk.customer_name || '').replace(/"/g, '""')}"`,
+    `"${(tk.issue_description || '').replace(/"/g, '""')}"`,
+    tk.status,
+    tk.priority || 'normal',
+    tk.assigned_agent || 'Unassigned',
+    tk.created_at
+  ]);
+
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(row => row.join(','))
+  ].join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

@@ -291,20 +291,24 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleArchiveTicket = async (id: string) => {
+const handleArchiveTicket = async (id: string) => {
+    // Optimistic UI update
     setTickets((prev) =>
       prev.map((tk) => (tk.id === id ? { ...tk, is_archived: true } : tk))
     );
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("tickets")
         .update({ is_archived: true })
-        .eq("id", id);
+        .eq("id", id)
+        .select();
 
       if (error) {
-        console.error("Failed to archive ticket:", error);
+        console.error("Failed to archive ticket in Supabase:", error.message || error);
         fetchTickets(false);
+      } else {
+        console.log("Successfully archived ticket:", data);
       }
     } catch (err) {
       console.error("Exception archiving ticket:", err);
