@@ -1,8 +1,6 @@
 "use server";
 
-import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import nodemailer from "nodemailer";
 
 export async function sendTicketUpdateEmail(
   toEmail: string,
@@ -11,9 +9,19 @@ export async function sendTicketUpdateEmail(
   newStatus: string
 ) {
   try {
-    const { data, error } = await resend.emails.send({
-      from: "onboarding@resend.dev",
-      to: toEmail,
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.ethereal.email",
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: false, // TLS via STARTTLS on port 587
+      auth: {
+        user: process.env.SMTP_USER || "waldo82@ethereal.email",
+        pass: process.env.SMTP_PASS || "WYxxByr5xDWQFxMwSt",
+      },
+    });
+
+    const info = await transporter.sendMail({
+      from: '"BPO Support Operations" <support@bpo-middleeast.com>',
+      to: toEmail || "waldo82@ethereal.email",
       subject: `[Ticket Update] Status changed to ${newStatus.toUpperCase()}`,
       html: `
         <div style="font-family: sans-serif; padding: 20px; background-color: #0f172a; color: #f8fafc; border-radius: 12px;">
@@ -26,12 +34,13 @@ export async function sendTicketUpdateEmail(
       `,
     });
 
-    if (error) {
-      console.error("Resend API Error:", error);
-      return { success: false, error };
-    }
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    console.log("----------------------------------------");
+    console.log("✉️ Ethereal Email Sent!");
+    console.log("🔗 Preview Email Link:", previewUrl);
+    console.log("----------------------------------------");
 
-    return { success: true, data };
+    return { success: true, messageId: info.messageId, previewUrl };
   } catch (err: any) {
     console.error("Failed to send email:", err);
     return { success: false, error: err.message };
