@@ -7,6 +7,8 @@ import { formatRelativeTime } from '@/lib/formatTime';
 import { getTickets, updateTicketStatus, assignTicketAgent, getTicketReplies, addTicketReply } from "../actions";
 import { exportToPDF } from '@/lib/exportHelpers';
 import FileUpload from "@/components/FileUpload";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+import { sendTicketUpdateEmail } from "../actions/email";
 
 type Ticket = {
   id: string;
@@ -41,6 +43,8 @@ const DICTIONARY = {
     in_progress: "In Progress",
     resolved: "Resolved",
     archived: "Archived",
+    analyticsBtn: "Supervisor Analytics",
+    queueBtn: "View Ticket Queue",
     priorityLabel: "Priority:",
     searchPlaceholder: "Search name or description",
     refreshBtn: "Refresh Queue",
@@ -68,6 +72,8 @@ const DICTIONARY = {
     in_progress: "قيد التنفيذ",
     resolved: "مكتمل",
     archived: "المؤرشفة",
+    analyticsBtn: "تحليلات المشرفين",
+    queueBtn: "عرض قائمة التذاكر",
     priorityLabel: "الأولوية:",
     searchPlaceholder: "البحث باسم العميل أو الوصف",
     refreshBtn: "تحديث القائمة",
@@ -96,6 +102,7 @@ export default function AdminDashboard() {
   // State
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("all");
+  const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
   const [userEmail, setUserEmail] = useState<string>("");
@@ -281,7 +288,17 @@ export default function AdminDashboard() {
 
     try {
       const result = await updateTicketStatus(id, newStatus);
-      if (!result.success) {
+      if (result.success) {
+        const updatedTicket = tickets.find((t) => t.id === id);
+        if (updatedTicket) {
+await sendTicketUpdateEmail(
+  "aguilarmckean11@gmail.com", // Change this to your actual Resend login email
+  updatedTicket.customer_name,
+  id,
+  newStatus
+);
+        }
+      } else {
         console.error("Failed to update status in database:", result.error);
         fetchTickets(false);
       }
@@ -291,8 +308,7 @@ export default function AdminDashboard() {
     }
   };
 
-const handleArchiveTicket = async (id: string) => {
-    // Optimistic UI update
+  const handleArchiveTicket = async (id: string) => {
     setTickets((prev) =>
       prev.map((tk) => (tk.id === id ? { ...tk, is_archived: true } : tk))
     );
@@ -466,6 +482,19 @@ const handleArchiveTicket = async (id: string) => {
             >
               🌐 {lang === "en" ? "العربية (AR)" : "English (EN)"}
             </button>
+
+            {/* Supervisor Analytics Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center gap-2 border ${
+                showAnalytics
+                  ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-600/30"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+              }`}
+            >
+              📊 {showAnalytics ? t.queueBtn : t.analyticsBtn}
+            </button>
             
             {/* Export Compliance PDF Button */}
             <button
@@ -522,8 +551,8 @@ const handleArchiveTicket = async (id: string) => {
                   </div>
 
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
-                    {notifications.map((notif: NotificationItem) => (
-                      <div key={notif.id} className="p-3 hover:bg-slate-800/50 transition text-left">
+                    {notifications.map((notif: NotificationItem, index: number) => (
+                      <div key={`${notif.id}-${index}`} className="p-3 hover:bg-slate-800/50 transition text-left">
                         <div className="flex justify-between items-start mb-1">
                           <span className="text-xs font-semibold text-indigo-400">{notif.title}</span>
                           <div className="flex items-center gap-1.5 text-[10px] text-slate-400" dir="ltr">
@@ -615,77 +644,129 @@ const handleArchiveTicket = async (id: string) => {
         </div>
 
         {/* FILTERS & SEARCH */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          
-          {/* MINIMALIST UNDERLINE TAB BAR */}
-          <div
-            role="tablist"
-            aria-label="Filter tickets by status"
-            className="flex items-center gap-6 border-b border-slate-800 overflow-x-auto w-full lg:w-auto"
-          >
-            {(["all", "open", "in_progress", "resolved", "archived"] as TabKey[]).map((key) => {
-              const active = activeTab === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveTab(key)}
-                  className={`pb-3 text-xs font-semibold transition-all relative flex items-center gap-2 whitespace-nowrap outline-none ${
-                    active
-                      ? "text-indigo-400 font-bold"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <span>{t[key]}</span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+        {!showAnalytics && (
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            {/* MINIMALIST UNDERLINE TAB BAR */}
+            <div
+              role="tablist"
+              aria-label="Filter tickets by status"
+              className="flex items-center gap-4 md:gap-6 border-b border-slate-800 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden w-full lg:w-auto pb-1"
+            >
+              {(["all", "open", "in_progress", "resolved", "archived"] as TabKey[]).map((key) => {
+                const active = activeTab === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveTab(key)}
+                    className={`pb-3 text-xs font-semibold transition-all relative flex items-center gap-2 whitespace-nowrap outline-none ${
                       active
-                        ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
-                        : "bg-slate-800 text-slate-400"
+                        ? "text-indigo-400 font-bold"
+                        : "text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    {counts[key]}
-                  </span>
-                  {active && (
-                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-in fade-in" />
-                  )}
+                    <span>{t[key]}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        active
+                          ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                          : "bg-slate-800 text-slate-400"
+                      }`}
+                    >
+                      {counts[key]}
+                    </span>
+                    {active && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500 rounded-full animate-in fade-in" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+              <span>{t.priorityLabel}</span>
+              {["all", "high", "medium", "low", "normal"].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPriorityFilter(p)}
+                  className={`px-2.5 py-1 rounded-md capitalize transition-colors ${
+                    priorityFilter === p
+                      ? "bg-slate-700 text-white font-bold border border-slate-600"
+                      : "hover:bg-slate-800/60 text-slate-400"
+                  }`}
+                >
+                  {p}
                 </button>
-              );
-            })}
-          </div>
+              ))}
+            </div>
 
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-            <span>{t.priorityLabel}</span>
-            {["all", "high", "medium", "low", "normal"].map((p) => (
-              <button
-                key={p}
-                onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1 rounded-md capitalize transition-colors ${
-                  priorityFilter === p
-                    ? "bg-slate-700 text-white font-bold border border-slate-600"
-                    : "hover:bg-slate-800/60 text-slate-400"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+            <div className="relative w-full lg:w-72">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t.searchPlaceholder}
+                className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg py-2.5 px-3 placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
           </div>
+        )}
 
-          <div className="relative w-full lg:w-72">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t.searchPlaceholder}
-              className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg py-2.5 px-3 placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+        {/* ANALYTICS VIEW OR TICKET QUEUE LIST */}
+        {showAnalytics ? (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="bg-slate-800/60 border border-slate-700/60 p-6 rounded-2xl">
+              <h2 className="text-lg font-bold text-white mb-2">📊 Regional Support Operations Analytics</h2>
+              <p className="text-xs text-slate-400 mb-6">Real-time performance metrics and ticket distribution across Middle East queues.</p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Ticket Volume Bar Chart */}
+                <div className="bg-slate-900/80 border border-slate-700/60 p-4 rounded-xl">
+                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wide mb-4">Ticket Volume by Status</h3>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={[
+                        { name: 'Open', count: tickets.filter(t => !t.is_archived && t.status === 'open').length },
+                        { name: 'In Progress', count: tickets.filter(t => !t.is_archived && t.status === 'in_progress').length },
+                        { name: 'Resolved', count: tickets.filter(t => !t.is_archived && t.status === 'resolved').length },
+                        { name: 'Archived', count: tickets.filter(t => t.is_archived).length },
+                      ]}>
+                        <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                        <YAxis stroke="#94a3b8" fontSize={12} />
+                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#f8fafc' }} />
+                        <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Priority Breakdown Summary Card */}
+                <div className="bg-slate-900/80 border border-slate-700/60 p-4 rounded-xl flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wide mb-2">Priority Distribution</h3>
+                    <p className="text-xs text-slate-400 mb-4">Breakdown of active operational risk levels.</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                      <span className="text-xs font-semibold text-rose-400">🔴 High Priority</span>
+                      <span className="text-sm font-bold text-white">{tickets.filter(t => !t.is_archived && t.priority?.toLowerCase() === 'high').length}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                      <span className="text-xs font-semibold text-amber-400">🟡 Medium Priority</span>
+                      <span className="text-sm font-bold text-white">{tickets.filter(t => !t.is_archived && t.priority?.toLowerCase() === 'medium').length}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                      <span className="text-xs font-semibold text-emerald-400">🟢 Normal / Low Priority</span>
+                      <span className="text-sm font-bold text-white">{tickets.filter(t => !t.is_archived && (!t.priority || t.priority?.toLowerCase() === 'normal' || t.priority?.toLowerCase() === 'low')).length}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-
-        {/* TICKET QUEUE LIST */}
-        {loading ? (
+        ) : loading ? (
           <div className="text-slate-400 text-center py-12">
             Loading tickets...
           </div>
@@ -729,7 +810,6 @@ const handleArchiveTicket = async (id: string) => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* Supervisor Interactive Assignment Dropdown */}
                   {userRole === "supervisor" ? (
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <span className="text-xs text-amber-400 font-medium">{t.assignedTo || "Assigned:"}</span>
@@ -758,7 +838,6 @@ const handleArchiveTicket = async (id: string) => {
                     )
                   )}
 
-                  {/* Status Dropdown with stopPropagation */}
                   <select
                     value={ticket.status}
                     onClick={(e) => e.stopPropagation()}
@@ -770,7 +849,6 @@ const handleArchiveTicket = async (id: string) => {
                     <option value="resolved">{t.resolved}</option>
                   </select>
 
-                  {/* Archive Button for Resolved Tickets */}
                   {ticket.status === "resolved" && !ticket.is_archived && (
                     <button
                       type="button"
